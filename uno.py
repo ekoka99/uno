@@ -436,8 +436,9 @@ while True:
             print("Direction reversed!")
             next_player = (current_player + direction) % len(players)
         elif card.value == "Skip":
-            next_player = (current_player + 1 * direction) % len(players)
-            print(f"{players[next_player].name} is skipped!")
+            skipped_player = (current_player + direction) % len(players)
+            next_player = (current_player + 2 * direction) % len(players)
+            print(f"{players[skipped_player].name} is skipped!")
         elif card.value == "+2":
             next_player = (current_player + direction) % len(players)
             players[next_player].draw(deck, 2)
