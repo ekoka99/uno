@@ -50,6 +50,9 @@ class Card:
         new_card = Card(new_color, self.value)
         return new_card
 
+    def set_color(self, new_color):
+        self.current_color = new_color
+
     def reset_wild_color(self):
         if self.value in WILD_VALUES:
             self.current_color = "Wild"
@@ -165,7 +168,7 @@ def ai_play_easy(player, top_card, players, current_player):
             return card
     return playable_cards[0] if playable_cards else None
 
-def ai_play_medium(player, top_card, players, current_player):
+def ai_play_medium(player, top_card, players, current_player, direction):
     playable_cards = [card for card in player.hand if is_valid_play(card, top_card)]
     game_progress = player.evaluate_game_state(players, current_player)
 
@@ -178,11 +181,36 @@ def ai_play_medium(player, top_card, players, current_player):
 
     if random.random() < 0.25:
         return random.choice(playable_cards) if playable_cards else None
-    return ai_play_hard(player, top_card, players, current_player)
+    return ai_play_hard(player, top_card, players, current_player, direction)
 
-def ai_play_hard(player, top_card, players, current_player):
+def ai_play_hard(player, top_card, players, current_player, direction):
     playable_cards = [card for card in player.hand if is_valid_play(card, top_card)]
     game_progress = player.evaluate_game_state(players, current_player)
+    color_counts = {
+        color: len([card for card in player.hand if card.current_color == color])
+        for color in COLORS
+    }
+
+    # Defense: if the next player is close to winning, prioritize hitting them
+    # with an action card over the usual value/priority-based choice.
+    next_player = players[(current_player + direction) % len(players)]
+    if len(next_player.hand) <= 2:
+        action_priority = ["Skip", "Reverse", "+2", "+4"]
+        defensive_cards = [
+            card for card in playable_cards if card.value in action_priority
+        ]
+        if defensive_cards:
+            chosen = max(
+                defensive_cards,
+                key=lambda c: (
+                    action_priority.index(c.value),
+                    color_counts.get(c.current_color, 0),
+                ),
+            )
+            if chosen.value in WILD_VALUES:
+                best_color = max(COLORS, key=lambda color: color_counts[color])
+                chosen.set_color(best_color)
+            return chosen
 
     if game_progress < 0.7:
         non_wild_cards = [
@@ -199,24 +227,27 @@ def ai_play_hard(player, top_card, players, current_player):
             ]
             if action_cards:
                 return max(
-                    action_cards, key=lambda c: ["Skip", "Reverse", "+2"].index(c.value)
+                    action_cards,
+                    key=lambda c: (
+                        ["Skip", "Reverse", "+2"].index(c.value),
+                        color_counts.get(c.current_color, 0),
+                    ),
                 )
             elif color_matches:
-                return max(color_matches, key=lambda c: VALUES.index(c.value))
+                return max(
+                    color_matches,
+                    key=lambda c: (VALUES.index(c.value), color_counts.get(c.current_color, 0)),
+                )
             else:
-                return max(non_wild_cards, key=lambda c: VALUES.index(c.value))
-        elif len(player.hand) > 1:
-            return None
+                return max(
+                    non_wild_cards,
+                    key=lambda c: (VALUES.index(c.value), color_counts.get(c.current_color, 0)),
+                )
 
     wild_cards = [card for card in playable_cards if card.current_color == "Wild"]
     if wild_cards:
-        best_color = max(
-            COLORS,
-            key=lambda color: len(
-                [card for card in player.hand if card.current_color == color]
-            ),
-        )
-        chosen_wild = max(wild_cards, key=lambda c: c.value)
+        best_color = max(COLORS, key=lambda color: color_counts[color])
+        chosen_wild = max(wild_cards, key=lambda c: WILD_VALUES.index(c.value))
         chosen_wild.set_color(best_color)
         return chosen_wild
 
@@ -226,13 +257,13 @@ def ai_play_hard(player, top_card, players, current_player):
         else None
     )
 
-def ai_play(player, top_card, players, current_player):
+def ai_play(player, top_card, players, current_player, direction):
     if player.difficulty == "Easy":
         return ai_play_easy(player, top_card, players, current_player)
     elif player.difficulty == "Medium":
-        return ai_play_medium(player, top_card, players, current_player)
+        return ai_play_medium(player, top_card, players, current_player, direction)
     else:
-        return ai_play_hard(player, top_card, players, current_player)
+        return ai_play_hard(player, top_card, players, current_player, direction)
 
 
 def render_stacked_cards(num_cards, width):
@@ -322,11 +353,27 @@ while discard_pile[0].value in WILD_VALUES:
 
 difficulties = ["Easy", "Medium", "Hard"]
 
+
+def prompt_difficulty(seat_name):
+    options = {"1": "Easy", "2": "Medium", "3": "Hard", "4": "Random"}
+    while True:
+        choice = input(
+            f"Choose difficulty for {seat_name} (1=Easy, 2=Medium, 3=Hard, 4=Random): "
+        ).strip()
+        if choice in options:
+            selected = options[choice]
+            return random.choice(difficulties) if selected == "Random" else selected
+        print("Invalid choice. Please enter 1, 2, 3, or 4.")
+
+
+print("Set up the AI opponents:")
+ai_difficulties = [prompt_difficulty(f"AI {i}") for i in range(1, 4)]
+
 players = [
     Player("You"),
-    Player(f"AI 1 ({random.choice(difficulties)})", True, random.choice(difficulties)),
-    Player(f"AI 2 ({random.choice(difficulties)})", True, random.choice(difficulties)),
-    Player(f"AI 3 ({random.choice(difficulties)})", True, random.choice(difficulties)),
+    Player(f"AI 1 ({ai_difficulties[0]})", True, ai_difficulties[0]),
+    Player(f"AI 2 ({ai_difficulties[1]})", True, ai_difficulties[1]),
+    Player(f"AI 3 ({ai_difficulties[2]})", True, ai_difficulties[2]),
 ]
 
 for player in players:
@@ -348,7 +395,7 @@ while True:
     render_game_state(players, current_player, top_card, direction, debug_mode)
     
     if player.is_ai:
-        card = ai_play(player, top_card, players, current_player)
+        card = ai_play(player, top_card, players, current_player, direction)
         if card:
             player.play(card)
             print(f"{player.name} played {card}")
@@ -427,7 +474,7 @@ while True:
                     player.sort_hand()
         
         if len(player.hand) == 0:
-            render_game_state(players, current_player, card, debug_mode)
+            render_game_state(players, current_player, card, direction, debug_mode)
             print(f"{player.name} wins!")
             break
         
